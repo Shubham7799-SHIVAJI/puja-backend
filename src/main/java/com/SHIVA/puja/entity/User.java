@@ -31,6 +31,9 @@ public class User {
     @Column(name = "email_verified")
     private Boolean emailVerified;
 
+    @Column(name = "last_login_at")
+    private LocalDateTime lastLoginAt;
+
     @Column(name = "created_at")
     private LocalDateTime createdAt;
 
