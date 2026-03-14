@@ -51,3 +51,37 @@ SET @create_new_index_sql := IF(
 PREPARE stmt FROM @create_new_index_sql;
 EXECUTE stmt;
 DEALLOCATE PREPARE stmt;
+
+SET @has_password_hash_col := (
+    SELECT COUNT(*)
+    FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = 'users'
+      AND COLUMN_NAME = 'password_hash'
+);
+
+SET @add_password_hash_col_sql := IF(
+    @has_password_hash_col = 0,
+    'ALTER TABLE users ADD COLUMN password_hash VARCHAR(255) NULL AFTER email_verified',
+    'SELECT 1'
+);
+PREPARE stmt FROM @add_password_hash_col_sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @has_users_email_uk := (
+    SELECT COUNT(*)
+    FROM information_schema.STATISTICS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = 'users'
+      AND INDEX_NAME = 'uk_users_email'
+);
+
+SET @add_users_email_uk_sql := IF(
+    @has_users_email_uk = 0,
+    'CREATE UNIQUE INDEX uk_users_email ON users (email)',
+    'SELECT 1'
+);
+PREPARE stmt FROM @add_users_email_uk_sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;

@@ -23,6 +23,8 @@ import jakarta.mail.internet.MimeMessage;
 
 import com.SHIVA.puja.dto.LoginRequest;
 import com.SHIVA.puja.dto.ResendOtpRequest;
+import com.SHIVA.puja.dto.SetPasswordRequest;
+import com.SHIVA.puja.dto.SignInRequest;
 import com.SHIVA.puja.dto.VerifyOtpRequest;
 import com.SHIVA.puja.entity.OtpPurpose;
 import com.SHIVA.puja.entity.OtpRequest;
@@ -31,6 +33,8 @@ import com.SHIVA.puja.exception.ApiException;
 import com.SHIVA.puja.repository.OtpRequestRepository;
 import com.SHIVA.puja.repository.UserRepository;
 import com.SHIVA.puja.service.UserService;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.security.crypto.password.PasswordEncoder;
 
 @Service
 public class UserServiceImpl implements UserService {
@@ -41,6 +45,7 @@ public class UserServiceImpl implements UserService {
     private final UserRepository userRepository;
     private final OtpRequestRepository otpRequestRepository;
     private final JavaMailSender mailSender;
+    private final PasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
     private final SecureRandom secureRandom = new SecureRandom();
 
     @Value("${app.otp.expiration-minutes:5}")
@@ -76,8 +81,11 @@ public class UserServiceImpl implements UserService {
             throw new ApiException(HttpStatus.BAD_REQUEST, "VALIDATION_ERROR", "Name and email are required.");
         }
 
-        User user = userRepository.findTopByEmailOrderByIdDesc(email)
-                .orElseGet(User::new);
+        if (userRepository.existsByEmail(email)) {
+            throw new ApiException(HttpStatus.CONFLICT, "EMAIL_ALREADY_REGISTERED", "EMAIL_ALREADY_REGISTERED");
+        }
+
+        User user = new User();
 
         user.setFullName(name);
         user.setEmail(email);
@@ -151,6 +159,60 @@ public class UserServiceImpl implements UserService {
 
         user.setEmailVerified(true);
         user.setStatus("ACTIVE");
+        user.setLastLoginAt(LocalDateTime.now());
+        user.setUpdatedAt(LocalDateTime.now());
+        userRepository.save(user);
+    }
+
+    @Override
+    @Transactional
+    public void setPassword(SetPasswordRequest request) {
+        String email = normalize(request.getContact());
+        String password = normalize(request.getPassword());
+        String confirmPassword = normalize(request.getConfirmPassword());
+
+        if (email == null || password == null || confirmPassword == null) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "VALIDATION_ERROR", "Email and password details are required.");
+        }
+
+        if (!password.equals(confirmPassword)) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "PASSWORD_MISMATCH", "Password and re-enter password do not match.");
+        }
+
+        User user = userRepository.findTopByEmailOrderByIdDesc(email)
+                .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "USER_NOT_FOUND", "User not found for this email."));
+
+        if (!Boolean.TRUE.equals(user.getEmailVerified())) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "EMAIL_NOT_VERIFIED", "Please verify OTP before setting password.");
+        }
+
+        user.setPasswordHash(passwordEncoder.encode(password));
+        user.setStatus("ACTIVE");
+        user.setUpdatedAt(LocalDateTime.now());
+        userRepository.save(user);
+    }
+
+    @Override
+    @Transactional
+    public void signIn(SignInRequest request) {
+        String email = normalize(request.getContact());
+        String password = normalize(request.getPassword());
+
+        if (email == null || password == null) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "VALIDATION_ERROR", "Email and password are required.");
+        }
+
+        User user = userRepository.findTopByEmailOrderByIdDesc(email)
+                .orElseThrow(() -> new ApiException(HttpStatus.BAD_REQUEST, "INVALID_CREDENTIALS", "Invalid email or password."));
+
+        if (user.getPasswordHash() == null || user.getPasswordHash().isBlank()) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "PASSWORD_NOT_SET", "Please set your password after OTP verification.");
+        }
+
+        if (!passwordEncoder.matches(password, user.getPasswordHash())) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "INVALID_CREDENTIALS", "Invalid email or password.");
+        }
+
         user.setLastLoginAt(LocalDateTime.now());
         user.setUpdatedAt(LocalDateTime.now());
         userRepository.save(user);
